@@ -1,3 +1,6 @@
 anyio
 rapidfuzz
+httpx
+trafilatura
+duckduckgo-search
 
