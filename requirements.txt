@@ -1,4 +1,5 @@
 anyio
 rapidfuzz
 httpx
+trafilatura
 
