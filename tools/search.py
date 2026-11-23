@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import urllib.parse
 from typing import Any, Callable, Dict, List, Optional
 
 from duckduckgo_search import DDGS
@@ -13,6 +14,33 @@ from duckduckgo_search.exceptions import DuckDuckGoSearchException, RatelimitExc
 from tools.cache import get_cached, set_cached
 
 logger = logging.getLogger(__name__)
+
+# Domains providing generic dictionary/encyclopedia definitions rather than software/vendors
+DISALLOWED_DOMAINS = (
+    "wikipedia.org",
+    "merriam-webster.com",
+    "dictionary.cambridge.org",
+    "cambridge.org",
+    "dictionary.com",
+    "wiktionary.org",
+    "thefreedictionary.com",
+    "britannica.com",
+)
+
+
+def filter_relevant_results(results: List[Dict[str, str]]) -> List[Dict[str, str]]:
+    """Filter out dictionary and encyclopedia pages from search results."""
+    filtered: List[Dict[str, str]] = []
+    for r in results:
+        url = r.get("url", "")
+        try:
+            netloc = urllib.parse.urlparse(url).netloc.lower()
+            if any(disallowed in netloc for disallowed in DISALLOWED_DOMAINS):
+                continue
+        except Exception:
+            pass
+        filtered.append(r)
+    return filtered
 
 
 def _sync_ddgs_search(query: str, max_results: int, backend: str = "auto") -> List[Dict[str, str]]:
@@ -69,13 +97,15 @@ async def search(
     # 2. If test callable provided, use it
     if backend_fn is not None:
         if asyncio.iscoroutinefunction(backend_fn):
-            results = await backend_fn(clean_query, max_results)
+            raw_results = await backend_fn(clean_query, max_results)
         else:
-            results = backend_fn(clean_query, max_results)
+            raw_results = backend_fn(clean_query, max_results)
 
-        if use_cache:
-            set_cached(cache_key, json.dumps(results))
-        return results
+        filtered = filter_relevant_results(raw_results or [])
+        # Relevance guard: do NOT cache if fewer than 3 survive
+        if use_cache and len(filtered) >= 3:
+            set_cached(cache_key, json.dumps(filtered))
+        return filtered
 
     # 3. DuckDuckGo search with rate-limit retry and backend fallback
     backends = ["auto", "lite", "html"]
@@ -83,11 +113,13 @@ async def search(
 
     for attempt, backend in enumerate(backends):
         try:
-            results = await asyncio.to_thread(_sync_ddgs_search, clean_query, max_results, backend)
-            if results:
-                if use_cache:
-                    set_cached(cache_key, json.dumps(results))
-                return results
+            raw_results = await asyncio.to_thread(_sync_ddgs_search, clean_query, max_results, backend)
+            filtered = filter_relevant_results(raw_results or [])
+            if filtered:
+                # Relevance guard: do NOT cache if fewer than 3 survive
+                if use_cache and len(filtered) >= 3:
+                    set_cached(cache_key, json.dumps(filtered))
+                return filtered
         except (RatelimitException, DuckDuckGoSearchException, Exception) as exc:
             last_exc = exc
             logger.warning(

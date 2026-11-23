@@ -221,21 +221,25 @@ async def test_fetch_url_empty_extraction():
 
 @pytest.mark.anyio
 async def test_search_caching():
-    """Verify search queries are cached in SQLite."""
+    """Verify search queries with >= 3 results are cached in SQLite."""
     mock_calls = 0
 
     def mock_backend(q: str, max_r: int):
         nonlocal mock_calls
         mock_calls += 1
-        return [{"title": "HealthPlix", "url": "https://healthplix.com", "snippet": "Reminders"}]
+        return [
+            {"title": "HealthPlix", "url": "https://healthplix.com", "snippet": "Reminders"},
+            {"title": "Qikwell", "url": "https://qikwell.com", "snippet": "Reminders"},
+            {"title": "mPower", "url": "https://mpower.com", "snippet": "Reminders"},
+        ]
 
     results1 = await search("patient reminder", max_results=5, backend_fn=mock_backend)
-    assert len(results1) == 1
+    assert len(results1) == 3
     assert mock_calls == 1
 
     # Second call should be served from cache
     results2 = await search("patient reminder", max_results=5, backend_fn=mock_backend)
-    assert len(results2) == 1
+    assert len(results2) == 3
     assert mock_calls == 1  # No second invocation
 
 
@@ -265,6 +269,30 @@ async def test_search_empty_query():
     """Verify searching for an empty string returns empty list immediately."""
     assert await search("") == []
     assert await search("   ") == []
+
+
+@pytest.mark.anyio
+async def test_search_relevance_guard_drops_dictionaries_and_rejects_cache():
+    """Verify dictionary/encyclopedia domains are dropped and <3 surviving items are not cached."""
+    raw_dictionary_results = [
+        {"title": "Patient - Wikipedia", "url": "https://en.wikipedia.org/wiki/Patient", "snippet": "A patient is..."},
+        {"title": "PATIENT - Merriam-Webster", "url": "https://www.merriam-webster.com/dictionary/patient", "snippet": "definition"},
+        {"title": "PATIENT - Cambridge", "url": "https://dictionary.cambridge.org/dictionary/english/patient", "snippet": "meaning"},
+        {"title": "PATIENT - Dictionary.com", "url": "https://www.dictionary.com/browse/patient", "snippet": "noun"},
+        {"title": "Valid Vendor Tool", "url": "https://healthplix.com/reminders", "snippet": "Hospital reminder software"},
+    ]
+
+    query = "patient appointment reminder software India hospital"
+    cache_key = f"search:{query.lower()}:5"
+
+    results = await search(query, max_results=5, use_cache=True, backend_fn=lambda q, m: raw_dictionary_results)
+
+    # 1. 4 dictionary results were dropped, only 1 valid vendor survived
+    assert len(results) == 1
+    assert results[0]["title"] == "Valid Vendor Tool"
+
+    # 2. Because < 3 results survived, cache must NOT be set
+    assert get_cached(cache_key) is None
 
 
 # ===========================================================================
