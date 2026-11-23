@@ -11,6 +11,33 @@ from __future__ import annotations
 from typing import List, Optional, Literal
 from pydantic import BaseModel, Field, HttpUrl, validator
 
+# 7 Mandatory Indian Healthcare Compliance Criteria
+INDIA_CRITERIA_KEYS: List[str] = [
+    "whatsapp_api",
+    "dlt_sms",
+    "regional_languages",
+    "abdm_abha",
+    "dpdp_compliance",
+    "emr_integration",
+    "inr_pricing",
+]
+
+# Standard Research Attributes (12 total: 7 India criteria + 5 commercial/operational)
+STANDARD_ATTRIBUTES: List[str] = [
+    "whatsapp_api",
+    "dlt_sms",
+    "regional_languages",
+    "abdm_abha",
+    "dpdp_compliance",
+    "emr_integration",
+    "inr_pricing",
+    "price_per_month",
+    "setup_fee",
+    "appointment_reminders",
+    "two_way_confirmation",
+    "multi_location",
+]
+
 
 class Claim(BaseModel):
     """A single factual statement extracted from a source.
