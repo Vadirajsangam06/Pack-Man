@@ -18,8 +18,27 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable, Dict, List, Optional, Set
 
-from schemas import Plan, PlanStep
+from schemas import Plan, PlanStep, Claim
+from pydantic import BaseModel, Field
 import db
+
+
+class RetryItem(BaseModel):
+    """Item emitted by analysis/verification requiring targeted re-research."""
+    vendor: str = Field(..., description="Name of the vendor")
+    attribute: str = Field(..., description="Specific attribute requiring re-research")
+    reason: str = Field(..., description="Explanation of why retry was triggered")
+
+
+@dataclass
+class RetryOutcome:
+    """Outcome of a retry cycle for a specific vendor attribute."""
+    vendor: str
+    attribute: str
+    status: str  # "verified" or "unverified"
+    rounds_attempted: int
+    claim: Claim
+    reason: str
 
 
 @dataclass
@@ -438,3 +457,197 @@ class Orchestrator:
             step_results=step_results,
             duration=run_duration,
         )
+
+    async def run_retries(
+        self,
+        needs_retry: List[RetryItem],
+        task_id: int = 1,
+        max_rounds_per_item: int = 2,
+        task_context: Optional[Dict[str, Any]] = None,
+    ) -> List[RetryOutcome]:
+        """Execute targeted retry rounds for items requiring re-research."""
+        return await run_retry_loop(
+            needs_retry=needs_retry,
+            task_id=task_id,
+            registry=self.registry,
+            max_rounds_per_item=max_rounds_per_item,
+            task_context=task_context,
+        )
+
+
+async def run_retry_loop(
+    needs_retry: List[RetryItem],
+    task_id: int,
+    registry: Optional[AgentRegistry] = None,
+    max_rounds_per_item: int = 2,
+    task_context: Optional[Dict[str, Any]] = None,
+) -> List[RetryOutcome]:
+    """Execute targeted re-research loop for claims needing retry.
+
+    Parameters
+    ----------
+    needs_retry : List[RetryItem]
+        Items needing re-research (vendor, attribute, reason).
+    task_id : int
+        Current task ID.
+    registry : Optional[AgentRegistry]
+        Registry holding research and verifier handlers.
+    max_rounds_per_item : int
+        Maximum retry rounds per (vendor, attribute) pair (default 2).
+    task_context : Optional[Dict[str, Any]]
+        Optional context parameters.
+
+    Returns
+    -------
+    List[RetryOutcome]
+        Results of retries with verified claims or claims marked 'unverified'.
+    """
+    reg = registry or AgentRegistry()
+    context = dict(task_context or {})
+    outcomes: List[RetryOutcome] = []
+
+    # Get research handler
+    research_handler = reg.get("research") or reg.get("research_b") or reg.get("research_a")
+    verifier_handler = reg.get("verifier")
+
+    for item in needs_retry:
+        rounds_attempted = 0
+        resolved_claim: Optional[Claim] = None
+        succeeded = False
+
+        for round_num in range(1, max_rounds_per_item + 1):
+            rounds_attempted = round_num
+
+            # Log retry round started
+            db.log_event(
+                task_id=task_id,
+                agent="orchestrator",
+                type="retry_round",
+                payload={
+                    "vendor": item.vendor,
+                    "attribute": item.attribute,
+                    "reason": item.reason,
+                    "round": round_num,
+                    "max_rounds": max_rounds_per_item,
+                },
+            )
+
+            if not research_handler:
+                break
+
+            try:
+                # Build research arguments targeting the specific vendor & attribute
+                task_desc = context.get("task", f"Re-research {item.vendor} {item.attribute}")
+                sig = inspect.signature(research_handler)
+                kwargs: Dict[str, Any] = {}
+                if "task" in sig.parameters:
+                    kwargs["task"] = task_desc
+                if "vendor_focus" in sig.parameters:
+                    kwargs["vendor_focus"] = item.vendor
+                elif "vendor" in sig.parameters:
+                    kwargs["vendor"] = item.vendor
+
+                # Execute research call
+                if inspect.iscoroutinefunction(research_handler):
+                    claims_found = await research_handler(**kwargs)
+                else:
+                    claims_found = await asyncio.to_thread(research_handler, **kwargs)
+
+                if isinstance(claims_found, list) and claims_found:
+                    # Look for matching claim
+                    candidate = None
+                    for c in claims_found:
+                        if isinstance(c, Claim) and c.vendor.lower() == item.vendor.lower():
+                            if c.attribute.lower() == item.attribute.lower() or not candidate:
+                                candidate = c
+
+                    if candidate:
+                        # If verifier is present, verify the candidate
+                        is_verified = True
+                        if verifier_handler:
+                            v_sig = inspect.signature(verifier_handler)
+                            v_kwargs = {"claims": [candidate]} if "claims" in v_sig.parameters else {}
+                            if inspect.iscoroutinefunction(verifier_handler):
+                                v_res = await verifier_handler(**v_kwargs)
+                            else:
+                                v_res = await asyncio.to_thread(verifier_handler, **v_kwargs)
+
+                            if isinstance(v_res, list) and v_res:
+                                is_verified = any(
+                                    getattr(vr, "status", None) == "verified" for vr in v_res
+                                )
+
+                        if is_verified:
+                            succeeded = True
+                            resolved_claim = candidate
+                            db.log_event(
+                                task_id=task_id,
+                                agent="orchestrator",
+                                type="retry_resolved",
+                                payload={
+                                    "vendor": item.vendor,
+                                    "attribute": item.attribute,
+                                    "round": round_num,
+                                    "value": candidate.value,
+                                    "source_url": str(candidate.source_url),
+                                },
+                            )
+                            break
+
+            except Exception as exc:
+                db.log_event(
+                    task_id=task_id,
+                    agent="orchestrator",
+                    type="retry_round_error",
+                    payload={
+                        "vendor": item.vendor,
+                        "attribute": item.attribute,
+                        "round": round_num,
+                        "error": str(exc),
+                    },
+                )
+
+        if succeeded and resolved_claim:
+            outcomes.append(
+                RetryOutcome(
+                    vendor=item.vendor,
+                    attribute=item.attribute,
+                    status="verified",
+                    rounds_attempted=rounds_attempted,
+                    claim=resolved_claim,
+                    reason=item.reason,
+                )
+            )
+        else:
+            # Mark claim unverified as required by contract
+            unverified_claim = Claim(
+                vendor=item.vendor,
+                attribute=item.attribute,
+                value="unverified",
+                source_url="https://unverified.internal/retry-exhausted",  # type: ignore
+                snippet=f"Unverified after {rounds_attempted} retry rounds. Reason: {item.reason}",
+            )
+            db.log_event(
+                task_id=task_id,
+                agent="orchestrator",
+                type="retry_exhausted",
+                payload={
+                    "vendor": item.vendor,
+                    "attribute": item.attribute,
+                    "reason": item.reason,
+                    "rounds_attempted": rounds_attempted,
+                    "status": "unverified",
+                },
+            )
+            outcomes.append(
+                RetryOutcome(
+                    vendor=item.vendor,
+                    attribute=item.attribute,
+                    status="unverified",
+                    rounds_attempted=rounds_attempted,
+                    claim=unverified_claim,
+                    reason=item.reason,
+                )
+            )
+
+    return outcomes

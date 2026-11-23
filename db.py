@@ -102,10 +102,127 @@ def log_event(task_id: int, agent: str, type: str, payload: Dict[str, Any]) -> N
     )
     _conn.commit()
 
+
+# ---------------------------------------------------------------------------
+# Task History Save / Load
+# ---------------------------------------------------------------------------
+def create_task(description: str) -> int:
+    """Create a new task record and return its ID."""
+    created_at = __import__("time").time()
+    _cur.execute(
+        "INSERT INTO tasks (description, created_at) VALUES (?, ?)",
+        (description, created_at),
+    )
+    _conn.commit()
+    return _cur.lastrowid  # type: ignore
+
+
+def record_run_start(task_id: int) -> int:
+    """Record the beginning of a plan execution run for task_id."""
+    start_ts = __import__("time").time()
+    _cur.execute(
+        "INSERT INTO runs (task_id, start_ts, status) VALUES (?, ?, ?)",
+        (task_id, start_ts, "running"),
+    )
+    _conn.commit()
+    return _cur.lastrowid  # type: ignore
+
+
+def record_run_end(run_id: int, status: str) -> None:
+    """Record completion of a plan execution run."""
+    end_ts = __import__("time").time()
+    _cur.execute(
+        "UPDATE runs SET end_ts = ?, status = ? WHERE id = ?",
+        (end_ts, status, run_id),
+    )
+    _conn.commit()
+
+
+def list_runs(limit: int = 50) -> list[Dict[str, Any]]:
+    """List past runs with task description, timestamps, and status."""
+    _cur.execute(
+        """
+        SELECT r.id, r.task_id, t.description, r.start_ts, r.end_ts, r.status
+        FROM runs r
+        LEFT JOIN tasks t ON r.task_id = t.id
+        ORDER BY r.start_ts DESC
+        LIMIT ?
+        """,
+        (limit,),
+    )
+    rows = _cur.fetchall()
+    return [
+        {
+            "id": row[0],
+            "task_id": row[1],
+            "description": row[2] or "",
+            "start_ts": row[3],
+            "end_ts": row[4],
+            "status": row[5],
+        }
+        for row in rows
+    ]
+
+
+def load_run_events(task_id: int) -> list[Dict[str, Any]]:
+    """Load all events for a given task_id ordered chronologically."""
+    _cur.execute(
+        """
+        SELECT id, task_id, agent, type, payload, timestamp
+        FROM events
+        WHERE task_id = ?
+        ORDER BY id ASC
+        """,
+        (task_id,),
+    )
+    rows = _cur.fetchall()
+    results = []
+    for row in rows:
+        try:
+            payload = json.loads(row[4])
+        except Exception:
+            payload = {"raw": row[4]}
+        results.append(
+            {
+                "id": row[0],
+                "task_id": row[1],
+                "agent": row[2],
+                "type": row[3],
+                "payload": payload,
+                "timestamp": row[5],
+            }
+        )
+    return results
+
+
+def list_tasks(limit: int = 50) -> list[Dict[str, Any]]:
+    """List recent tasks."""
+    _cur.execute(
+        "SELECT id, description, created_at FROM tasks ORDER BY created_at DESC LIMIT ?",
+        (limit,),
+    )
+    rows = _cur.fetchall()
+    return [
+        {"id": row[0], "description": row[1], "created_at": row[2]}
+        for row in rows
+    ]
+
+
 # Helper to fetch a DB cursor for other modules (read‑only or write).
 def get_connection() -> sqlite3.Connection:
     """Return the shared SQLite connection."""
     return _conn
 
-# Expose the connection for tests that need direct queries.
-__all__ = ["log_event", "get_connection", "DB_PATH"]
+
+# Expose functions.
+__all__ = [
+    "log_event",
+    "create_task",
+    "record_run_start",
+    "record_run_end",
+    "list_runs",
+    "load_run_events",
+    "list_tasks",
+    "get_connection",
+    "DB_PATH",
+]
