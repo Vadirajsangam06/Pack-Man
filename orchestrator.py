@@ -85,16 +85,16 @@ class AgentRegistry:
     def _load_available_stubs(self) -> None:
         """Attempt to lazily load available agent modules if they exist."""
         try:
-            from agents.research import run_research
+            from agents.research import run_research, run_research_a, run_research_b
             self._registry["research"] = run_research
-            self._registry["research_a"] = run_research
-            self._registry["research_b"] = run_research
+            self._registry["research_a"] = run_research_a
+            self._registry["research_b"] = run_research_b
         except (ImportError, AttributeError):
             pass
 
         try:
-            from agents.analysis import analyze
-            self._registry["analysis"] = analyze
+            from agents.analysis import analyze, analyze_async
+            self._registry["analysis"] = analyze_async if callable(analyze_async) else analyze
         except (ImportError, AttributeError):
             pass
 
@@ -139,11 +139,17 @@ async def _execute_callable(
     dep_outputs = [dep_results[d].output for d in step.depends_on if d in dep_results and dep_results[d].status == "completed"]
 
     if "claims" in params and "claims" not in kwargs:
-        # Collect claims from prior research steps
+        # Collect claims from prior research steps (direct or transitive)
         aggregated_claims = []
         for out in dep_outputs:
             if isinstance(out, list):
                 aggregated_claims.extend(out)
+        if not aggregated_claims:
+            for res in dep_results.values():
+                if res.status == "completed" and isinstance(res.output, list):
+                    for item in res.output:
+                        if isinstance(item, Claim) or hasattr(item, "vendor"):
+                            aggregated_claims.append(item)
         kwargs["claims"] = aggregated_claims
 
     if "analysis" in params and "analysis" not in kwargs:
@@ -151,12 +157,22 @@ async def _execute_callable(
             if hasattr(out, "conflicts") or hasattr(out, "summary"):
                 kwargs["analysis"] = out
                 break
+        if "analysis" not in kwargs:
+            for res in dep_results.values():
+                if res.status == "completed" and (hasattr(res.output, "conflicts") or hasattr(res.output, "summary")):
+                    kwargs["analysis"] = res.output
+                    break
 
     if "verified" in params and "verified" not in kwargs:
         for out in dep_outputs:
             if isinstance(out, list) and out and hasattr(out[0], "claim_id"):
                 kwargs["verified"] = out
                 break
+        if "verified" not in kwargs:
+            for res in dep_results.values():
+                if res.status == "completed" and isinstance(res.output, list) and res.output and hasattr(res.output[0], "claim_id"):
+                    kwargs["verified"] = res.output
+                    break
 
     if "task" in params and "task" not in kwargs:
         if "task" in task_context:
