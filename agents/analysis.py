@@ -26,19 +26,16 @@ import re
 from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from pydantic import BaseModel, Field
 
-from schemas import Claim, Analysis, Conflict, VerificationResult
+from schemas import (
+    Claim,
+    Analysis,
+    Conflict,
+    VerificationResult,
+    INDIA_CRITERIA_KEYS,
+    STANDARD_ATTRIBUTES,
+)
 import llm
 import db
-
-INDIA_CRITERIA_KEYS = [
-    "whatsapp_api",
-    "dlt_sms",
-    "regional_languages",
-    "abdm_abha",
-    "dpdp_compliance",
-    "emr_integration",
-    "inr_pricing",
-]
 
 INDIA_CRITERIA_LABELS = {
     "whatsapp_api": "WhatsApp Business API",
