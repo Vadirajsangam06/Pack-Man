@@ -3,4 +3,7 @@ rapidfuzz
 httpx
 trafilatura
 duckduckgo-search
+reportlab
+streamlit
+pandas
 

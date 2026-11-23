@@ -116,6 +116,9 @@ async def test_manager_to_orchestrator_real_registry():
             "Skipping real-registry integration test until M2, M3, and M4 stubs are merged."
         )
 
+    if not os.environ.get("GEMINI_API_KEY"):
+        pytest.skip("GEMINI_API_KEY not set in environment for live real-registry integration test.")
+
     # If all teammate modules are present on main, execute the real pipeline
     plan = await create_plan("Hospital appointment reminder software")
     orch = Orchestrator(registry=AgentRegistry())
