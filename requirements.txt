@@ -1,3 +1,4 @@
 anyio
 rapidfuzz
+httpx
 
