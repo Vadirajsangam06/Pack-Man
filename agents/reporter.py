@@ -152,11 +152,34 @@ async def build_report(
         "Outbound communications require explicit operator review and confirmation before transmission.",
     ]
 
-    # Generate draft emails for top shortlisted vendors
-    sample_vendors = ["HealthPlix", "Qikwell", "SparkTG", "Mishtel"]
+    # Determine shortlisted vendors dynamically from claims, summary, or conflicts
+    shortlisted_vendors: List[str] = []
+    if "claims" in kwargs and kwargs["claims"]:
+        for c in kwargs["claims"]:
+            v = getattr(c, "vendor", None)
+            if v and v not in shortlisted_vendors:
+                shortlisted_vendors.append(v)
+
+    if analysis:
+        # Check vendors mentioned in summary
+        if hasattr(analysis, "summary") and analysis.summary:
+            known_check = ["HealthPlix", "Qikwell", "SparkTG", "Mishtel", "Practo", "Clinizy", "eSanjeevani", "mPower"]
+            for v in known_check:
+                if v.lower() in analysis.summary.lower() and v not in shortlisted_vendors:
+                    shortlisted_vendors.append(v)
+
+        # Check conflicts
+        if hasattr(analysis, "conflicts") and analysis.conflicts:
+            for conf in analysis.conflicts:
+                if conf.vendor and conf.vendor not in shortlisted_vendors:
+                    shortlisted_vendors.append(conf.vendor)
+
+    if not shortlisted_vendors:
+        shortlisted_vendors = ["HealthPlix", "Qikwell", "SparkTG", "Mishtel"]
+
     draft_emails: Dict[str, str] = {}
 
-    for v in sample_vendors:
+    for v in shortlisted_vendors:
         draft = create_vendor_email_draft(v)
         draft_emails[v] = draft
         # Register pending approval gate
