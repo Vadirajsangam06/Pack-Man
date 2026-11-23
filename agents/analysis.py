@@ -44,6 +44,24 @@ INDIA_CRITERIA_KEYS = [
     "inr_pricing",
 ]
 
+# Single source of truth for standard research attributes (12 total)
+STANDARD_ATTRIBUTES = [
+    # 7 Mandatory Indian Healthcare Compliance Criteria
+    "whatsapp_api",
+    "dlt_sms",
+    "regional_languages",
+    "abdm_abha",
+    "dpdp_compliance",
+    "emr_integration",
+    "inr_pricing",
+    # 5 Commercial & Operational Attributes
+    "price_per_month",
+    "setup_fee",
+    "appointment_reminders",
+    "two_way_confirmation",
+    "multi_location",
+]
+
 INDIA_CRITERIA_LABELS = {
     "whatsapp_api": "WhatsApp Business API",
     "dlt_sms": "DLT / TRAI SMS Compliance",
@@ -207,7 +225,11 @@ def score_india_criteria(claims: List[Claim]) -> Dict[str, Dict[str, Any]]:
                 attr = c.attribute.lower()
                 val = c.value.lower()
                 # Check for criteria matches
-                if key in attr or (key == "inr_pricing" and ("price" in attr or "inr" in val or "₹" in val)):
+                if (
+                    key in attr
+                    or (key == "dpdp_compliance" and "dpdp" in attr)
+                    or (key == "inr_pricing" and ("price" in attr or "inr" in val or "₹" in val))
+                ):
                     if any(pos in val for pos in ["yes", "supported", "compliant", "verified", "true", "₹", "inr"]):
                         status = "Supported"
                         criteria_met += 1
