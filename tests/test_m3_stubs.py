@@ -21,10 +21,13 @@ from fixtures.m3_fixtures import (
 def anyio_backend():
     return "asyncio"
 
-def test_verifier_stub():
-    """Verify that verify() stub returns valid list[VerificationResult]."""
+@pytest.mark.anyio
+async def test_verifier_stub():
+    """Verify that verify() returns valid list[VerificationResult]."""
     claims = [MATCHING_SNIPPET_CLAIM, SNIPPET_ABSENT_CLAIM, PAYWALLED_CLAIM]
-    results = verify(claims)
+    def dummy_fetch(url):
+        return "Sample page content with Pricing starts at ₹2500 per month for small to medium healthcare practices."
+    results = await verify(claims, fetch_fn=dummy_fetch)
     assert isinstance(results, list)
     assert len(results) == 3
     for i, res in enumerate(results):
