@@ -36,10 +36,10 @@ async def test_verifier_stub():
         assert res.status in ("verified", "unverifiable", "failed")
 
 def test_analysis_stub():
-    """Verify that analyze() stub returns valid Analysis object."""
+    """Verify that analyze() returns valid Analysis object."""
     claims = [MATCHING_SNIPPET_CLAIM, CONFLICTING_CLAIM_A, CONFLICTING_CLAIM_B]
     result = analyze(claims)
     assert isinstance(result, Analysis)
-    assert result.agreements == 3
-    assert isinstance(result.conflicts, list)
-    assert "3 claims" in result.summary
+    assert result.agreements == 1
+    assert len(result.conflicts) == 1
+    assert "3 claim(s)" in result.summary
