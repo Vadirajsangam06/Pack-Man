@@ -27,8 +27,12 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 from pydantic import BaseModel, Field
 
 from schemas import Claim, Analysis, Conflict, VerificationResult
+from orchestrator import RetryItem
 import llm
 import db
+
+# Alias for backward compatibility
+NeedsRetryItem = RetryItem
 
 INDIA_CRITERIA_KEYS = [
     "whatsapp_api",
@@ -68,11 +72,7 @@ class AnalysisMetrics(BaseModel):
     retries_suggested: int = 0
 
 
-class NeedsRetryItem(BaseModel):
-    """Item requiring targeted re-research, matching M1 RetryItem contract."""
-    vendor: str
-    attribute: str
-    reason: str
+
 
 
 def normalize_val(val: str) -> str:

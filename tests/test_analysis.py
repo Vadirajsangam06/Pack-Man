@@ -156,3 +156,68 @@ async def test_analyze_async_full_pipeline(monkeypatch):
     assert isinstance(res, Analysis)
     assert len(res.conflicts) == 1
     assert "India Healthcare Compliance Scores" in res.summary
+
+
+def test_retry_item_matches_orchestrator():
+    """Verify that NeedsRetryItem is identical to orchestrator.RetryItem."""
+    from orchestrator import RetryItem as OrchestratorRetryItem
+    from agents.analysis import NeedsRetryItem, RetryItem
+
+    assert RetryItem is OrchestratorRetryItem
+    assert NeedsRetryItem is OrchestratorRetryItem
+    assert set(RetryItem.model_fields.keys()) == {"vendor", "attribute", "reason"}
+
+
+def test_edge_case_empty_claims():
+    """Harden edge case: empty claim list."""
+    res = analyze([])
+    assert isinstance(res, Analysis)
+    assert len(res.conflicts) == 0
+    assert res.agreements == 0
+    assert "0 claim(s)" in res.summary
+
+    metrics = calculate_metrics([], [])
+    assert metrics.total_claims == 0
+    assert metrics.verified_percentage == 0.0
+
+
+def test_edge_case_all_claims_unverifiable():
+    """Harden edge case: all claims are unverifiable."""
+    claim = Claim(vendor="UnvVendor", attribute="pricing", value="₹100", source_url="https://paywall.com", snippet="paywall")
+    verifications = [VerificationResult(claim_id=0, status="unverifiable", details="Paywall 403")]
+
+    retries = generate_retry_list([claim], verifications)
+    assert len(retries) == 1
+    assert retries[0].vendor == "UnvVendor"
+
+    metrics = calculate_metrics([claim], [], verifications, retries=retries)
+    assert metrics.verified_percentage == 0.0
+    assert metrics.unverifiable_count == 1
+    assert metrics.retries_suggested == 1
+
+
+def test_edge_case_single_vendor():
+    """Harden edge case: a single vendor."""
+    claims = [
+        Claim(vendor="SoloVendor", attribute="whatsapp_api", value="Supported", source_url="https://solo.com", snippet="whatsapp"),
+        Claim(vendor="SoloVendor", attribute="inr_pricing", value="Supported", source_url="https://solo.com", snippet="inr"),
+    ]
+    matrix = build_feature_matrix(claims)
+    assert len(matrix) == 1
+    assert "SoloVendor" in matrix
+    scorecard = score_india_criteria(claims)
+    assert "SoloVendor" in scorecard
+    assert "2/7" in scorecard["SoloVendor"]["total_score"]
+
+
+def test_edge_case_duplicate_claims_identical_values():
+    """Harden edge case: duplicate claims with identical values counting as agreements."""
+    claims = [
+        Claim(vendor="VendorDup", attribute="whatsapp_api", value="Supported", source_url="https://source1.com", snippet="snip1"),
+        Claim(vendor="VendorDup", attribute="whatsapp_api", value="Supported", source_url="https://source2.com", snippet="snip2"),
+        Claim(vendor="VendorDup", attribute="whatsapp_api", value="Supported", source_url="https://source3.com", snippet="snip3"),
+    ]
+    conflicts, agreements = detect_conflicts_deterministic(claims)
+    assert len(conflicts) == 0
+    assert agreements == 3
+
