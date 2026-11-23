@@ -36,10 +36,10 @@ class PlanStep(BaseModel):
     """One atomic step in a generated plan.
 
     Example::
-        {"agent": "research", "action": "run_research", "args": {"task": "compare reminder apps", "vendor_focus": null}}
+        {"agent": "research_a", "action": "run_research", "args": {"task": "compare reminder apps", "vendor_focus": null}}
     """
 
-    agent: Literal["research", "analysis", "verifier", "reporter", "manager"]
+    agent: Literal["research", "research_a", "research_b", "analysis", "verifier", "reporter", "manager"]
     action: str
     args: dict
     depends_on: List[int] = Field(default_factory=list, description="Indices of preceding steps this step depends on")
@@ -50,9 +50,10 @@ class Plan(BaseModel):
 
     Example::
         {
-            "steps": [{"agent": "research", "action": "run_research", "args": {...}}],
+            "steps": [{"agent": "research_a", "action": "run_research", "args": {...}}],
             "assumptions": ["All vendors support WhatsApp Business API"],
-            "success_criteria": "At least three vendors with verified pricing"
+            "success_criteria": "At least three vendors with verified pricing",
+            "researcher_count": 2
         }
     """
 
@@ -60,6 +61,7 @@ class Plan(BaseModel):
     assumptions: List[str] = Field(default_factory=list)
     success_criteria: str
     summary: Optional[str] = None
+    researcher_count: int = Field(default=2, ge=1, le=6, description="Number of parallel researcher agents to spawn")
 
 
 class Conflict(BaseModel):
@@ -123,4 +125,3 @@ class Report(BaseModel):
     title: str
     content: str
     draft_emails: dict = Field(default_factory=dict)
-
