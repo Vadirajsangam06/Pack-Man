@@ -12,7 +12,7 @@ import os
 import sqlite3
 from typing import Any, Dict
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "..", "agentflow.db")
+DB_PATH = os.path.join(os.path.dirname(__file__), "agentflow.db")
 
 # Ensure the directory exists and initialise the DB on first import.
 _conn = sqlite3.connect(DB_PATH, check_same_thread=False)
